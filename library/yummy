@@ -1,0 +1,142 @@
+#!/usr/bin/python -tt
+# -*- coding: utf-8 -*-
+
+# (c) 2012, Red Hat, Inc
+# Written by Seth Vidal <skvidal at fedoraproject.org>
+#
+# This file is part of Ansible
+#
+# Ansible is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Ansible is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+
+import traceback
+
+DOCUMENTATION = '''
+---
+module: yum
+short_description: Manages packages with the I(yum) package manager
+description:
+     - Will install, upgrade, remove, and list packages with the I(yum) package manager.
+options:
+  name:
+    description:
+      - package name, or package specifier with version, like C(name-1.0).
+    required: true
+    default: null
+    aliases: []
+  list:
+    description:
+      - various non-idempotent commands for usage with C(/usr/bin/ansible) and I(not) playbooks. See examples.
+    required: false
+    default: null
+  state:
+    description:
+      - whether to install (C(present), C(latest)), or remove (C(absent)) a package.
+    required: false
+    choices: [ "present", "latest", "absent" ]
+    default: "present"
+  enablerepo:
+    description:
+      - Repoid of repositories to enable for the install/update operation.
+        These repos will not persist beyond the transaction
+        multiple repos separated with a ','
+    required: false
+    version_added: "0.9"
+    default: null
+    aliases: []
+    
+  disablerepo:
+    description:
+      - I(repoid) of repositories to disable for the install/update operation
+        These repos will not persist beyond the transaction
+        Multiple repos separated with a ','
+    required: false
+    version_added: "0.9"
+    default: null
+    aliases: []
+    
+examples:
+   - code: yum name=httpd state=latest
+   - code: yum name=httpd state=removed
+   - code: yum name=httpd enablerepo=testing state=installed
+notes: []
+# informational: requirements for nodes
+requirements: [ yum, rpm ]
+author: Seth Vidal
+'''
+
+yumbin='/usr/bin/yum'
+noop_msgs=('Nothing to do', 'No Packages marked for Update', 'No Packages marked for removal')
+
+state_to_yum_commands = {
+    'present' = ['install', '-y'],
+    'latest' = ['update', '-y'],
+    'absent' = ['remove', '-y']
+}
+
+
+
+def ensure(module, state=None, pkgspecs=[], conf_file=None, enablerepo=[], disablerepo=[], debuglevel=1):
+    # params sanity
+    if state is None or pkgspecs == []:
+        module.exit_json({'changed': False, 'failed': False, 'msg': noop_msg})
+
+    if state not in state_to_yum_commands:
+        module.exit_json({
+            'changed': False,
+            'failed': True,
+            'msg': 'unknown state: %s' % state
+        })
+
+    yum_cmd = [yumbin, '-d', str(debuglevel), '-y']
+
+    if conf_file is not None:
+        yum_cmd += ['-c', str(conf_file)]
+
+    if disablerepo != []:
+        yum_cmd += ['--disablerepo', ','.join(map(lambda x: str(x), disablerepo))]
+
+    if enablerepo!= []:
+        yum_cmd += ['--enablerepo', ','.join(map(lambda x: str(x), disablerepo))]
+
+
+    result = {
+        'changed': False,
+        'failed': False,
+        'msg' = '',
+        'out' = ''
+    }
+
+    for spec in pkgspecs:
+        changed = True
+        rc, out, err = module.run_command(yum_cmd + [str(spec)])
+
+        noop_found = any([x for x in noop_msg if x in err])
+
+        if rc != 0 and noop_found
+            # idempotency check, twisted
+            err = ''
+            rc = 0
+            msg = str(spec) + ': ' + noop_msg
+            changed = False
+
+        if rc != 0:
+            result['failed'] = True
+
+        result['msg'] += err
+        result['out'] += out
+        result['changed'] |= changed
+
+    module.exit_json(**result)
